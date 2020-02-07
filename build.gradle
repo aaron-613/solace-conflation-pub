@@ -34,12 +34,13 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-jcl', version: '2.13.0'
 
     // JSON API dependency
-    implementation group: 'javax.json', name: 'javax.json-api', version: '1.1.4'
+    //implementation group: 'javax.json', name: 'javax.json-api', version: '1.1.4'
+    implementation group: 'org.glassfish', name: 'javax.json', version: '1.1.4'
 
     // Declare the dependency for your favourite test framework you want to use in your tests.
     // TestNG is also supported by the Gradle Test task. Just change the
     // testCompile dependency to testCompile 'org.testng:testng:6.8.1' and add
     // 'test.useTestNG()' to your build script.
-    testCompile 'junit:junit:4.12'
+    testImplementation 'junit:junit:4.12'
 }
 
