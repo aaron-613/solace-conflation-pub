@@ -66,15 +66,13 @@ public class Main {
     
     
     ScheduledExecutorService service = Executors.newScheduledThreadPool(10);
-    
-    
+    /* SOLACE VARIABLES */
     JCSMPSession session;
     JCSMPProperties properties;
     XMLMessageProducer producer;
     XMLMessageConsumer consumer;
+    PublishEventHandler streamingPubEventHandler;
     volatile boolean isConnected = false;
-	LinkedBlockingQueue<XMLMessage> publishedMessages = new LinkedBlockingQueue<XMLMessage>();
-
     
     private static final Logger logger = LogManager.getLogger("Main");
     private static final Charset UTF_8 = Charset.forName("UTF-8");
@@ -108,107 +106,7 @@ public class Main {
 	};
     
 //    JCSMPStreamingPublishCorrelatingEventHandler streamingPubEventHandler = new JCSMPStreamingPublishCorrelatingEventHandler() {
-    JCSMPStreamingPublishEventHandler streamingPubEventHandler = new JCSMPStreamingPublishEventHandler() {
         
-        @Override
-        public void responseReceived(String messageID) {
-        	// will never get called, since I've implemented the JCSMPStreamingPublishCorrelatingEventHandler interface
-        	logger.info("ACK "+messageID);
-        	XMLMessage msg;
-			try {
-				msg = publishedMessages.take();  // blocking call!
-//	        	if (!messageID.equals(msg.getMessageId())) {
-//	        		logger.warn("Difference!!!! msgID="+messageID+" vs. queue.msg.msgID="+msg.getAckMessageId());
-//	        	}
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-        }
-
-//		@Override
-		public void responseReceivedEx(Object key) {
-        	logger.info("ACK "+((XMLMessage)key).getMessageId());
-        	XMLMessage msg;
-			try {
-				msg = publishedMessages.take();  // blocking call!
-	        	if (!key.equals(msg)) {
-	        		logger.warn("Difference!!!!");
-	        		logger.warn(key);
-	        		logger.warn(msg);
-	        	}
-			} catch (InterruptedException e) {
-				e.printStackTrace();
-			}
-		}
-
-        @Override
-        public void handleError(String messageID, JCSMPException cause, long timestamp) {
-        	// will never get called, since I've implemented the JCSMPStreamingPublishCorrelatingEventHandler interface
-        	StringBuilder errorMsg = new StringBuilder();
-        	errorMsg.append("*** NACK *** ");
-        	if (messageID != null) {
-	        	XMLMessage msg;
-				try {
-					long start = System.currentTimeMillis();
-					msg = publishedMessages.take();  // take does a blocking call, rather than poll() which returns null possibly in a race condition
-					if ((System.currentTimeMillis()-start) > 50) {
-						logger.warn("It took WAAAAY too long for that take() call to return: "+(System.currentTimeMillis()-start)+" ms");
-					}
-//		        	if (!messageID.equals(msg.getMessageId())) {
-//		        		logger.warn("Difference!!!! msgID="+messageID+" vs. queue.msg.msgID="+msg.getAckMessageId());
-//		        	}
-				} catch (InterruptedException e) {
-					System.err.println("HOLY SHIT! this got thrown when trying to take a message off the publishing queue");
-					e.printStackTrace();
-				}
-	        	errorMsg.append(messageID+" - ");
-        	} else {
-	        	errorMsg.append("NULL - ");
-        	}
-        	if (cause instanceof JCSMPErrorResponseException) {
-        		cause = (JCSMPErrorResponseException)cause;
-        		JCSMPErrorResponseException respEx = (JCSMPErrorResponseException)cause;
-
-        		errorMsg.append(String.format("%s",respEx.getMessages()));//toString()));
-        	} else {
-        		errorMsg.append(cause);
-        	}
-        	logger.error(errorMsg.toString());
-        }
-
-//		@Override
-		public void handleErrorEx(Object key, JCSMPException cause, long timestamp) {
-        	StringBuilder errorMsg = new StringBuilder();
-        	errorMsg.append("*** NACK *** ");
-        	if (key != null) {
-	        	XMLMessage msg;
-				try {
-					msg = publishedMessages.take();  // take does a blocking call, rather than poll() which returns null possibly in a race condition
-		        	if (!key.equals(msg)) {
-		        		logger.warn("Difference!!!!");
-		        		logger.warn(key);
-		        		logger.warn(msg);
-		        	}
-				} catch (InterruptedException e) {
-					System.err.println("HOLY SHIT! this got thrown when trying to take a message off the publishing queue");
-					e.printStackTrace();
-				}
-	        	errorMsg.append(((XMLMessage)key).getMessageId()+" - ");
-        	} else {
-	        	errorMsg.append("NULL - ");
-        	}
-        	if (cause instanceof JCSMPErrorResponseException) {
-        		cause = (JCSMPErrorResponseException)cause;
-        		JCSMPErrorResponseException respEx = (JCSMPErrorResponseException)cause;
-
-        		errorMsg.append(String.format("%s",respEx.getMessages()));//toString()));
-        	} else {
-        		errorMsg.append(cause);
-        	}
-        	logger.error(errorMsg.toString());
-		}
-
-    };
     
     
     
@@ -224,7 +122,10 @@ public class Main {
         
         @Override
         public boolean preReconnect() throws JCSMPException {
-        	isConnected = false;
+            if (isConnected) {  // don't worry about multi-thread access or Atomic, only one thread will call this
+                logger.info("Disconnected!");
+                isConnected = false;
+            }
         	logger.info("About to attempt a reconnect attempt!");
             // log you are about to attempt to reconnect, do you want to continue?
             return true;
@@ -261,7 +162,7 @@ public class Main {
                         
             producer = session.getMessageProducer(streamingPubEventHandler,producerEventHandler);
             consumer = session.getMessageConsumer(reconnectEventHandler,messageListener);
-            
+            streamingPubEventHandler = new PublishEventHandler();
             session.connect();
             
             isConnected = true;
@@ -309,7 +210,7 @@ public class Main {
 						try {
 							producer.send(msg,queue);
 							// send call returns successfully, that's good!
-							publishedMessages.put(msg);
+							streamingPubEventHandler.addMessage(msg);
 						} catch (JCSMPException e) {
 							logger.error("Had an issue when trying to publish a message!!!",e);
 						}
